@@ -1,0 +1,244 @@
+---
+title: "SaiphClinical1"
+author: "Corey Scholes"
+format: html
+editor: visual
+---
+
+# Introduction
+
+The following analysis is intended as a companion supplementary file to the [manuscript]( ) for this project. The dataset is derived from the PRULO registry snapshot and live tables. A protocol has been previously prepared for the registry [@scholes2023].
+
+## Preparation
+
+Packages were loaded initially with *pacman* package. Citations were applied to each library at first use in the text.
+
+```{r}
+#| label: load-packages
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(# Load required packages
+  "gt",
+  "lme4",
+  "lmerTest",
+  "openxlsx2",
+  "tidyverse",
+  "tidymodels",
+  "lubridate",
+  "consort",
+  "gtsummary",
+  "survival",
+  "ggplot2",
+  "ggdist",
+  "ggfortify",
+  "mice",
+  "marginaleffects",
+  "naniar",
+  "quantreg",
+  "broom",
+  "epoxy",
+  "broom.helpers",
+  "stringr"
+  )
+  
+  
+```
+
+
+# Import dataset
+
+
+```{r}
+StudyMaster <- openxlsx2::wb_load(  "SourceData.xlsx") |> 
+  wb_to_df(    sheet = "Tabulated dataset") |> 
+  rename_with(
+    ~ gsub(" ", "", .x, fixed = TRUE)
+  ) |> rename_with(
+    ~ gsub("-", "", .x, fixed = TRUE)
+  )
+  
+```
+
+
+# Check input variables
+
+```{r}
+
+unique(StudyMaster$Gender)
+
+```
+
+```{r}
+StudyMaster$Surgeon |>
+  fct_anon() |>
+  fct_count()
+```
+
+```{r}
+StudyMaster1 <- StudyMaster |> mutate(
+  SurgeonAnon = fct_anon(Surgeon,"S")
+)
+```
+
+# Model site effects
+
+
+We will need to pivot the input table to long format to assess the effects of time.
+
+### Reorganise input data
+
+
+```{r}
+ModelInput <- StudyMaster1 |> dplyr::select(
+  PatientID,
+  SurgeonAnon,
+  Ageatsurgery,
+  Gender,
+  starts_with("KOOS12Total")
+) |> rename(
+  KOOS12Total_Pre = "KOOS12Totalpreop",
+  KOOS12Total_1yr ="KOOS12Total9mto15m",
+  KOOS12Total_2yr ="KOOS12Total16mto40m"
+) |> pivot_longer(
+  cols = starts_with("KOOS12Total"),
+  cols_vary = "fastest",
+  names_to = c(".value","Time"),
+  names_sep = "_",
+  values_drop_na = TRUE
+) |> mutate(
+  Time = forcats::fct(
+    Time,
+    levels = c("Pre","1yr","2yr")
+  )
+)
+```
+
+
+
+
+```{r}
+
+# null model ICC
+null <- lme4::lmer(KOOS12Total16mto40m ~ 1 + (1 | SurgeonAnon), data = StudyMaster1, REML = TRUE)
+var_centre <- as.numeric(VarCorr(null)$SurgeonAnon[1])
+var_resid  <- attr(VarCorr(null), "sc")^2
+ICC <- var_centre / (var_centre + var_resid)
+
+
+```
+
+```{r}
+
+
+library(tidyverse)
+
+ICC <- 0.05
+
+mean_cluster_size <- StudyMaster1 |>
+  count(SurgeonAnon, name = "n") |>
+  summarise(mean_n = mean(n)) |>
+  pull(mean_n)
+
+design_effect <- 1 + (mean_cluster_size - 1) * ICC
+
+mean_cluster_size
+design_effect
+
+
+```
+
+```{r}
+
+
+mean_cluster_size1 <- StudyMaster1 |>
+  count(SurgeonAnon, name = "n") |>
+  filter(n > 10) |>
+  summarise(mean_n = mean(n)) |>
+  pull(mean_n)
+
+design_effect1 <- 1 + (mean_cluster_size1 - 1) * ICC
+
+mean_cluster_size1
+design_effect1
+```
+
+```{r}
+cluster_sizes <- StudyMaster1 %>%
+  count(SurgeonAnon, name = "n") %>%
+  pull(n)
+
+N <- sum(cluster_sizes)
+
+DE_unequal <- 1 + ((sum(cluster_sizes^2)/N) - 1) * ICC
+DE_unequal
+```
+
+## Mixed effects
+
+```{r}
+fit_mixed1 <- lmerTest::lmer(KOOS12Total ~ Time + (1 | SurgeonAnon) + (1|PatientID), data = ModelInput)
+
+summary(fit_mixed1)
+```
+
+```{r}
+
+# Get Type III ANOVA to summarize effect of time
+anova_mixed <- anova(fit_mixed1, type = 3) |>
+  as.data.frame() |>
+  rownames_to_column("term") |>
+  mutate(
+    model = "Mixed-effects",
+    statistic = `F value`,        # F-statistic
+    p.value = as.numeric(`Pr(>F)`),
+    se = NA
+  ) |>
+  dplyr::select(model, statistic, p.value)
+
+anova_mixed
+
+```
+
+```{r}
+show_tests(anova_mixed, fractions = TRUE)$Time
+```
+
+
+
+## Kruskal-wallis
+
+
+```{r}
+kw_result <- ModelInput %>%
+  summarise(test = list(kruskal.test(KOOS12Total ~ Time))) %>%
+  mutate(tidy_result = map(test, tidy)) %>%
+  select(tidy_result) %>%
+  unnest(tidy_result) %>%
+  mutate(model = "Kruskal-Wallis") %>%
+  select(model, statistic, p.value)
+
+kw_result
+```
+
+## Comparison
+
+```{r}
+comparison_table <- bind_rows(
+  kw_result,
+  anova_mixed |>
+    dplyr::select(model, statistic, p.value)
+) |> gt() |>
+  fmt_number(columns = c(statistic),
+    decimals = 1,
+    use_seps = FALSE
+  ) |>
+  fmt_scientific(
+    columns = c(p.value),
+    decimals = 3
+  )
+
+
+knitr::knit_print(comparison_table)
+
+```
+

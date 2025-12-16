@@ -7,7 +7,7 @@ editor: visual
 
 # Introduction
 
-The following analysis is intended as a companion supplementary file to the [manuscript]( ) for this project. The dataset is derived from the PRULO registry snapshot and live tables. A protocol has been previously prepared for the registry [@scholes2023].
+The following analysis is intended as a companion supplementary file to the [manuscript]() for this project. The dataset is derived from the PRULO registry snapshot and live tables. A protocol has been previously prepared for the registry [@scholes2023].
 
 ## Preparation
 
@@ -44,9 +44,7 @@ pacman::p_load(# Load required packages
   
 ```
 
-
 # Import dataset
-
 
 ```{r}
 StudyMaster <- openxlsx2::wb_load(  "SourceData.xlsx") |> 
@@ -58,7 +56,6 @@ StudyMaster <- openxlsx2::wb_load(  "SourceData.xlsx") |>
   )
   
 ```
-
 
 # Check input variables
 
@@ -82,11 +79,9 @@ StudyMaster1 <- StudyMaster |> mutate(
 
 # Model site effects
 
-
 We will need to pivot the input table to long format to assess the effects of time.
 
 ### Reorganise input data
-
 
 ```{r}
 ModelInput <- StudyMaster1 |> dplyr::select(
@@ -112,9 +107,6 @@ ModelInput <- StudyMaster1 |> dplyr::select(
   )
 )
 ```
-
-
-
 
 ```{r}
 
@@ -203,10 +195,7 @@ anova_mixed
 show_tests(anova_mixed, fractions = TRUE)$Time
 ```
 
-
-
 ## Kruskal-wallis
-
 
 ```{r}
 kw_result <- ModelInput %>%
@@ -241,4 +230,3 @@ comparison_table <- bind_rows(
 knitr::knit_print(comparison_table)
 
 ```
-
